@@ -13,6 +13,12 @@ use bevy_window::{
     WindowClosing, WindowCreated, WindowFocused, WindowMode, WindowResized, WindowWrapper,
 };
 
+use std::ptr::null_mut;
+use raw_window_handle::HasWindowHandle;
+use winapi::um::winuser::{SetParent, FindWindowExA, EnumWindows, FindWindowA};
+use winapi::shared::windef::HWND;
+use winapi::shared::minwindef::LPARAM;
+
 use winit::{
     dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize},
     event_loop::ActiveEventLoop,
@@ -43,6 +49,7 @@ use crate::{
 /// If any of these entities are missing required components, those will be added with their
 /// default values.
 #[allow(clippy::too_many_arguments)]
+#[allow(unsafe_code)]
 pub fn create_windows<F: QueryFilter + 'static>(
     event_loop: &ActiveEventLoop,
     (
@@ -79,6 +86,16 @@ pub fn create_windows<F: QueryFilter + 'static>(
 
         if let Some(theme) = winit_window.theme() {
             window.window_theme = Some(convert_winit_theme(theme));
+        }
+
+        if window.draw_desktop {
+            let handle = match winit_window.window_handle().unwrap().as_raw() {
+                raw_window_handle::RawWindowHandle::Win32(handle) => handle.hwnd,
+                _ => panic!("Somehow ran windows32 code on a non-windows32 system!")
+            };
+            unsafe {
+                SetParent(handle.get() as _, find_workerw());
+            }
         }
 
         window
@@ -215,6 +232,58 @@ pub fn create_monitors(
             false
         }
     });
+}
+
+#[allow(unsafe_code)]
+unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> i32 {
+    unsafe {
+        // Check if the current window contains SHELLDLL_DefView
+        let shell_view = FindWindowExA(hwnd, null_mut(), "SHELLDLL_DefView\0".as_ptr() as *const i8, null_mut());
+        if !shell_view.is_null() {
+            // Locate the WorkerW window associated with the found SHELLDLL_DefView
+            let workerw = FindWindowExA(null_mut(), hwnd, "WorkerW\0".as_ptr() as *const i8, null_mut());
+            if !workerw.is_null() {
+                // Pass the WorkerW window handle back to the calling code via lparam
+                *(lparam as *mut HWND) = shell_view;
+            }
+        }
+    }
+
+    1 // Continue enumeration
+}
+
+#[allow(unsafe_code)]
+unsafe fn find_workerw() -> HWND {
+    unsafe {
+        // Step 1: Locate Progman (the desktop window manager)
+        let progman = FindWindowA("Progman\0".as_ptr() as *const i8, null_mut());
+        if progman.is_null() {
+            panic!("Failed to find Progman window");
+        }
+
+        let mut workerw: HWND = null_mut();
+        for _ in 0..5 {
+            // Step 2: Send a message to Progman to create a WorkerW window
+            use winapi::um::winuser::{SendMessageTimeoutA, SMTO_NORMAL};
+            SendMessageTimeoutA(progman, 0x052C, 0, 1, SMTO_NORMAL, 1000, null_mut());
+
+            // Step 3: Find the WorkerW window
+            EnumWindows(Some(enum_windows_proc), &mut workerw as *mut HWND as LPARAM);
+
+            if !workerw.is_null() {
+                return workerw;
+            }
+        }
+
+        // Some Windows 11 builds don't work like that
+        workerw = FindWindowA("WorkerW\0".as_ptr() as *const i8, null_mut());
+
+        if workerw.is_null() {
+            panic!("Failed to find WorkerW or SHELL_DefView window");
+        }
+
+        workerw
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
