@@ -272,6 +272,14 @@ pub struct Window {
     ///
     /// - Only supported on Windows.
     pub skip_taskbar: bool,
+    /// Sets whether the window should be drawn on the desktop.
+    ///
+    /// Note that this will only take effect on window creation.
+    ///
+    /// ## Platform-specific
+    ///
+    /// - Only supported on Windows.
+    pub draw_desktop: bool,
     /// Optional hint given to the rendering API regarding the maximum number of queued frames admissible on the GPU.
     ///
     /// Given values are usually within the 1-3 range. If not provided, this will default to 2.
@@ -337,6 +345,7 @@ impl Default for Window {
             window_theme: None,
             visible: true,
             skip_taskbar: false,
+            draw_desktop: true,
             desired_maximum_frame_latency: None,
             recognize_pinch_gesture: false,
             recognize_rotation_gesture: false,
